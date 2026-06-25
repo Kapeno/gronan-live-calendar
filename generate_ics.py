@@ -29,7 +29,7 @@ EXCLUDE_SCHEDULES = [
 # Skip individual events whose title contains these strings
 EXCLUDE_EVENT_TITLES = [
     "Happy Hour",
-    "Parken abonnerad",
+    # "Parken abonnerad",
 ]
 
 DEFAULT_DURATION = timedelta(hours=2)
