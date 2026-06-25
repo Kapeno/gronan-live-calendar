@@ -16,7 +16,14 @@ print("=== SCHEDULES ===")
 for schedule in data["response"]:
     print(schedule["internalTitle"], len(schedule["events"]))
 
-events = data["response"][0]["events"]
+events = []
+
+for schedule in data["response"]:
+    if schedule["internalTitle"] == "Grönan Live 2026 - Konsertlistning":
+        events = schedule["events"]
+        break
+
+print(f"Found {len(events)} Grönan Live events")
 
 
 def parse_datetime(value):
