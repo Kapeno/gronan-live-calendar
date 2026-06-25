@@ -20,7 +20,7 @@ INCLUDE_SCHEDULES = [
 
 # Skip events whose title contains any of these strings.
 EXCLUDE_EVENT_TITLES = [
-    "Parken abonnerad",
+    "Happy Hour",
 ]
 
 # Default duration if the API doesn't provide an end time.
