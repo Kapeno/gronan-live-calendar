@@ -9,7 +9,14 @@ TZ = ZoneInfo("Europe/Stockholm")
 response = requests.get(API_URL, timeout=30)
 response.raise_for_status()
 
-events = response.json()["response"][0]["events"]
+data = response.json()
+
+print("=== SCHEDULES ===")
+
+for schedule in data["response"]:
+    print(schedule["internalTitle"], len(schedule["events"]))
+
+events = data["response"][0]["events"]
 
 
 def parse_datetime(value):
