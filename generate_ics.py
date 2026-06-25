@@ -2,56 +2,105 @@ import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-API_URL = "https://prs-cdp-prod-webapiproxy.azurewebsites.net/api/glt/schedule/v2?scheduleTypes=Event"
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
 
-INCLUDE = [
+API_URL = (
+    "https://prs-cdp-prod-webapiproxy.azurewebsites.net/"
+    "api/glt/schedule/v2?scheduleTypes=Event"
+)
+
+TIMEZONE = ZoneInfo("Europe/Stockholm")
+
+# Include any schedule whose internal title contains one of these strings.
+INCLUDE_SCHEDULES = [
     "Grönan Live",
-    "GLT -",
 ]
 
-EXCLUDE = [
-    "förfest",
+# Skip events whose title contains any of these strings.
+EXCLUDE_EVENT_TITLES = [
+    "Parken abonnerad",
 ]
 
-TZ = ZoneInfo("Europe/Stockholm")
+# Default duration if the API doesn't provide an end time.
+DEFAULT_DURATION = timedelta(hours=2)
 
-response = requests.get(API_URL, timeout=30)
-response.raise_for_status()
 
-data = response.json()
-
-print("=== SCHEDULES ===")
-
-for schedule in data["response"]:
-    if schedule["internalTitle"] == "GLT - Scania":
-        import json
-        print(json.dumps(schedule, indent=2, ensure_ascii=False))
-
-print(schedule["internalTitle"], len(schedule["events"]))
-
-events = []
-
-for schedule in data["response"]:
-
-    title = schedule["internalTitle"]
-
-    if any(text in title for text in INCLUDE):
-        print(f"Adding: {title} ({len(schedule['events'])} events)")
-        events.extend(schedule["events"])
-
-print(f"Found {len(events)} events")
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
 
 def parse_datetime(value):
     if not value:
         return None
 
-    return datetime.fromisoformat(value).replace(tzinfo=TZ)
+    return datetime.fromisoformat(value).replace(tzinfo=TIMEZONE)
 
 
-events = sorted(
-    events,
-    key=lambda e: e.get("startDateAndTime") or ""
-)
+def to_utc(dt):
+    return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+# ------------------------------------------------------------
+# Fetch data
+# ------------------------------------------------------------
+
+response = requests.get(API_URL, timeout=30)
+response.raise_for_status()
+
+data = response.json()["response"]
+
+events = []
+
+for schedule in data:
+    title = schedule.get("internalTitle", "")
+
+    if any(include in title for include in INCLUDE_SCHEDULES):
+        events.extend(schedule["events"])
+
+
+# ------------------------------------------------------------
+# Clean & sort
+# ------------------------------------------------------------
+
+filtered_events = []
+
+for event in events:
+
+    title = event.get("title", "")
+
+    if any(text in title for text in EXCLUDE_EVENT_TITLES):
+        continue
+
+    start = parse_datetime(event.get("startDateAndTime"))
+
+    if start is None:
+        continue
+
+    end = parse_datetime(event.get("endDateAndTime"))
+
+    if end is None:
+        end = start + DEFAULT_DURATION
+
+    filtered_events.append(
+        {
+            "uid": event["id"],
+            "title": title,
+            "description": event.get("description")
+            or "Konsert på Gröna Lund",
+            "start": start,
+            "end": end,
+            "cancelled": event.get("cancelled", False),
+        }
+    )
+
+filtered_events.sort(key=lambda e: e["start"])
+
+
+# ------------------------------------------------------------
+# Generate ICS
+# ------------------------------------------------------------
 
 lines = [
     "BEGIN:VCALENDAR",
@@ -63,45 +112,32 @@ lines = [
     "X-WR-TIMEZONE:Europe/Stockholm",
 ]
 
-now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+dtstamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-for event in events:
+for event in filtered_events:
 
-    start = parse_datetime(event.get("startDateAndTime"))
+    title = event["title"]
 
-    if start is None:
-        print(f"Skipping {event.get('title')} (missing start)")
-        continue
-
-    end = parse_datetime(event.get("endDateAndTime"))
-
-    if end is None:
-        end = start + timedelta(hours=2)
-
-    title = event.get("title", "Unnamed event")
-
-    if event.get("cancelled"):
+    if event["cancelled"]:
         title = "INSTÄLLD – " + title
 
-    description = event.get("description") or "Konsert på Gröna Lund"
-
-    uid = event["id"]
-
-    lines.extend([
-        "BEGIN:VEVENT",
-        f"UID:{uid}@gronan-live",
-        f"DTSTAMP:{now}",
-        f"SUMMARY:{title}",
-        f"DESCRIPTION:{description}",
-        "LOCATION:Gröna Lund, Stockholm",
-        f"DTSTART:{start.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
-        f"DTEND:{end.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
-        "END:VEVENT",
-    ])
+    lines.extend(
+        [
+            "BEGIN:VEVENT",
+            f"UID:{event['uid']}@gronan-live",
+            f"DTSTAMP:{dtstamp}",
+            f"SUMMARY:{title}",
+            f"DESCRIPTION:{event['description']}",
+            "LOCATION:Gröna Lund, Stockholm",
+            f"DTSTART:{to_utc(event['start'])}",
+            f"DTEND:{to_utc(event['end'])}",
+            "END:VEVENT",
+        ]
+    )
 
 lines.append("END:VCALENDAR")
 
 with open("gronan-live.ics", "w", encoding="utf-8", newline="\r\n") as f:
     f.write("\r\n".join(lines))
 
-print(f"Wrote {len(events)} events.")
+print(f"Generated {len(filtered_events)} events.")
