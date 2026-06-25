@@ -4,6 +4,10 @@ from zoneinfo import ZoneInfo
 
 API_URL = "https://prs-cdp-prod-webapiproxy.azurewebsites.net/api/glt/schedule/v2?scheduleTypes=Event"
 
+INCLUDE = [
+    "Grönan Live",
+]
+
 TZ = ZoneInfo("Europe/Stockholm")
 
 response = requests.get(API_URL, timeout=30)
@@ -19,12 +23,14 @@ for schedule in data["response"]:
 events = []
 
 for schedule in data["response"]:
-    if schedule["internalTitle"] == "Grönan Live 2026 - Konsertlistning":
-        events = schedule["events"]
-        break
 
-print(f"Found {len(events)} Grönan Live events")
+    title = schedule["internalTitle"]
 
+    if any(text in title for text in INCLUDE):
+        print(f"Adding: {title} ({len(schedule['events'])} events)")
+        events.extend(schedule["events"])
+
+print(f"Found {len(events)} events")
 
 def parse_datetime(value):
     if not value:
