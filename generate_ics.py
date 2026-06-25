@@ -23,10 +23,11 @@ data = response.json()
 print("=== SCHEDULES ===")
 
 for schedule in data["response"]:
-if schedule["internalTitle"] == "GLT - Scania":
-    import json
-    print(json.dumps(schedule, indent=2, ensure_ascii=False))
-    print(schedule["internalTitle"], len(schedule["events"]))
+    if schedule["internalTitle"] == "GLT - Scania":
+        import json
+        print(json.dumps(schedule, indent=2, ensure_ascii=False))
+
+print(schedule["internalTitle"], len(schedule["events"]))
 
 events = []
 
