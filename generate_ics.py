@@ -16,9 +16,6 @@ TIMEZONE = ZoneInfo("Europe/Stockholm")
 # Schedules to include
 INCLUDE_SCHEDULES = [
     "Grönan Live",
-    # "Dansband",
-    # "FYRE",
-    # "Salsa",
 ]
 
 # Skip entire schedules
@@ -29,7 +26,6 @@ EXCLUDE_SCHEDULES = [
 # Skip individual events whose title contains these strings
 EXCLUDE_EVENT_TITLES = [
     "Happy Hour",
-    # "Parken abonnerad",
 ]
 
 DEFAULT_DURATION = timedelta(hours=2)
