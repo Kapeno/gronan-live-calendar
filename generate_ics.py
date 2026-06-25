@@ -6,6 +6,11 @@ API_URL = "https://prs-cdp-prod-webapiproxy.azurewebsites.net/api/glt/schedule/v
 
 INCLUDE = [
     "Grönan Live",
+    "GLT -",
+]
+
+EXCLUDE = [
+    "förfest",
 ]
 
 TZ = ZoneInfo("Europe/Stockholm")
