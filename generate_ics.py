@@ -170,6 +170,11 @@ print("Downloading Swedish concert metadata...")
 
 page_data = fetch_json(SHOWS_API)
 
+import json
+
+print(json.dumps(page_data["result"]["data"], indent=2)[:10000])
+raise SystemExit
+
 show_lookup: Dict[str, Dict[str, Any]] = {}
 
 blocks = (
