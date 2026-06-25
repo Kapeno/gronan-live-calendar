@@ -1,349 +1,123 @@
-#!/usr/bin/env python3
-
-from __future__ import annotations
-
-import re
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Any
-
 import requests
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-
 
 # ============================================================
 # Configuration
 # ============================================================
 
-SCHEDULE_API = (
+API_URL = (
     "https://prs-cdp-prod-webapiproxy.azurewebsites.net/"
     "api/glt/schedule/v2?scheduleTypes=Event"
 )
 
-SHOWS_API = (
-    "https://www.gronalund.com/"
-    "page-data/konserter/page-data.json"
-)
-
-OUTPUT_FILE = "gronan-live.ics"
-
 TIMEZONE = ZoneInfo("Europe/Stockholm")
 
-DEFAULT_DURATION = timedelta(hours=2)
-
-
-# Vilka scheman vill vi ha med?
+# Schedules to include
 INCLUDE_SCHEDULES = [
     "Grönan Live",
 ]
 
-# Hela scheman som alltid ska ignoreras
+# Skip entire schedules
 EXCLUDE_SCHEDULES = [
+    "GLT - Öl & sånt",
 ]
 
-# Eventtitlar som ska ignoreras
+# Skip individual events whose title contains these strings
 EXCLUDE_EVENT_TITLES = [
     "Happy Hour",
-    "Parken abonnerad",
 ]
 
+DEFAULT_DURATION = timedelta(hours=2)
 
 # ============================================================
-# Helpers
+# Helper functions
 # ============================================================
 
-def contains_any(text: str, values: list[str]) -> bool:
-    """Return True if text contains any string in values."""
 
-    text = text.casefold()
-
-    return any(value.casefold() in text for value in values)
-
-
-def parse_datetime(value: str | None) -> datetime | None:
-    """Convert API datetime to timezone aware datetime."""
-
+def parse_datetime(value):
     if not value:
         return None
 
-    return datetime.fromisoformat(value).replace(
-        tzinfo=TIMEZONE
-    )
+    return datetime.fromisoformat(value).replace(tzinfo=TIMEZONE)
 
 
-def utc(dt: datetime) -> str:
-    """ICS UTC timestamp."""
-
-    return (
-        dt.astimezone(timezone.utc)
-        .strftime("%Y%m%dT%H%M%SZ")
-    )
+def utc(dt):
+    return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def escape_ics(text: str) -> str:
-    """
-    Escape text according to RFC5545.
-    """
-
-    if not text:
-        return ""
-
-    text = text.replace("\\", "\\\\")
-    text = text.replace(";", r"\;")
-    text = text.replace(",", r"\,")
-    text = text.replace("\r\n", "\n")
-    text = text.replace("\r", "\n")
-    text = text.replace("\n", r"\n")
-
-    return text
-
-
-def clean_description(text: str) -> str:
-    """
-    Remove excessive whitespace and line breaks.
-    """
-
-    if not text:
-        return ""
-
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
-
-
-def fetch_json(url: str) -> dict:
-    """
-    Download JSON and raise if request fails.
-    """
-
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={
-            "User-Agent": "gronan-live-calendar"
-        },
-    )
-
-    response.raise_for_status()
-
-    return response.json()
-	
-# ============================================================
-# Load schedule API
-# ============================================================
-
-print("Downloading schedule...")
-
-schedule_data = fetch_json(SCHEDULE_API)
-
-schedule_events = []
-
-for schedule in schedule_data["response"]:
-
-    schedule_title = schedule.get("internalTitle", "")
-
-    if not contains_any(
-        schedule_title,
-        INCLUDE_SCHEDULES,
-    ):
-        continue
-
-    if contains_any(
-        schedule_title,
-        EXCLUDE_SCHEDULES,
-    ):
-        continue
-
-    for event in schedule["events"]:
-
-        event["_schedule"] = schedule_title
-
-        schedule_events.append(event)
-
-print(f"Loaded {len(schedule_events)} scheduled events.")
+def contains_any(text, patterns):
+    return any(pattern.lower() in text.lower() for pattern in patterns)
 
 
 # ============================================================
-# Load Swedish concert metadata
+# Download data
 # ============================================================
 
-print("Downloading Swedish concert metadata...")
+response = requests.get(API_URL, timeout=30)
+response.raise_for_status()
 
-page_data = fetch_json(SHOWS_API)
-
-import json
-
-print(json.dumps(page_data["result"]["data"], indent=2)[:10000])
-raise SystemExit
-
-show_lookup: Dict[str, Dict[str, Any]] = {}
-
-blocks = (
-    page_data["result"]["data"]
-    ["allContentfulShowBlock"]["nodes"]
-)
-
-for block in blocks:
-
-    title = block.get("title")
-
-    if not title:
-        continue
-
-    info = {
-        "title": title,
-        "description": clean_description(
-            (
-                block.get("preamble") or {}
-            ).get("preamble", "")
-        ),
-        "location": block.get("location") or "",
-        "url": "",
-        "externalEntryId": None,
-    }
-
-    page_link = block.get("pageLink")
-
-    if page_link:
-
-        slug = page_link.get("slug")
-
-        if slug:
-            info["url"] = (
-                "https://www.gronalund.com"
-                + slug
-            )
-
-    external = block.get("externalEntry")
-
-    if external:
-        info["externalEntryId"] = (
-            external.get("externalEntryId")
-        )
-
-    show_lookup[title.casefold()] = info
-
-
-print(
-    f"Loaded metadata for "
-    f"{len(show_lookup)} concerts."
-)
-
-
-# ============================================================
-# Merge API + metadata
-# ============================================================
+schedules = response.json()["response"]
 
 events = []
 
-for event in schedule_events:
+for schedule in schedules:
+
+    schedule_title = schedule.get("internalTitle", "")
+
+    if not contains_any(schedule_title, INCLUDE_SCHEDULES):
+        continue
+
+    if contains_any(schedule_title, EXCLUDE_SCHEDULES):
+        continue
+
+    for event in schedule["events"]:
+        event["_schedule"] = schedule_title
+        events.append(event)
+
+# ============================================================
+# Filter & normalize
+# ============================================================
+
+filtered = []
+
+for event in events:
 
     title = event.get("title", "")
 
-    if contains_any(
-        title,
-        EXCLUDE_EVENT_TITLES,
-    ):
+    if contains_any(title, EXCLUDE_EVENT_TITLES):
         continue
 
-    start = parse_datetime(
-        event.get("startDateAndTime")
-    )
+    start = parse_datetime(event.get("startDateAndTime"))
 
     if start is None:
         continue
 
-    end = parse_datetime(
-        event.get("endDateAndTime")
-    )
+    end = parse_datetime(event.get("endDateAndTime"))
 
     if end is None:
         end = start + DEFAULT_DURATION
 
-    metadata = show_lookup.get(
-        title.casefold(),
-        {},
-    )
-
-    description = (
-        metadata.get("description")
-        or event.get("description")
-        or ""
-    )
-
-    location = (
-        metadata.get("location")
-        or "Gröna Lund"
-    )
-
-    url = metadata.get("url", "")
-
-    events.append(
+    filtered.append(
         {
             "uid": event["id"],
             "title": title,
-            "description": description,
-            "location": location,
-            "url": url,
+            "description": event.get("description")
+            or f"Schema: {event['_schedule']}",
             "start": start,
             "end": end,
-            "cancelled": event.get(
-                "cancelled",
-                False,
-            ),
+            "cancelled": event.get("cancelled", False),
+            "schedule": event["_schedule"],
         }
     )
 
-events.sort(
-    key=lambda e: e["start"]
-)
-
-print(
-    f"Prepared {len(events)} calendar events."
-)
-# ============================================================
-# ICS writer
-# ============================================================
-
-def fold_ics_line(line: str) -> list[str]:
-    """
-    Fold long ICS lines according to RFC5545.
-    Max 75 octets (we approximate with 73 chars).
-    """
-
-    MAX = 73
-
-    if len(line) <= MAX:
-        return [line]
-
-    lines = []
-
-    while len(line) > MAX:
-        lines.append(line[:MAX])
-        line = " " + line[MAX:]
-
-    lines.append(line)
-
-    return lines
-
-
-def write_line(lines: list[str], line: str):
-    """
-    Write one folded ICS line.
-    """
-
-    for part in fold_ics_line(line):
-        lines.append(part)
-
+filtered.sort(key=lambda e: e["start"])
 
 # ============================================================
-# Build calendar
+# Generate ICS
 # ============================================================
 
-print("Generating ICS...")
-
-lines = []
-
-lines.extend([
+lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Grönan Live Calendar//SV",
@@ -351,98 +125,39 @@ lines.extend([
     "METHOD:PUBLISH",
     "X-WR-CALNAME:Grönan Live",
     "X-WR-TIMEZONE:Europe/Stockholm",
-])
+]
 
-dtstamp = utc(datetime.now(timezone.utc))
+dtstamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-for event in events:
+for event in filtered:
 
-    lines.append("BEGIN:VEVENT")
-
-    write_line(
-        lines,
-        f"UID:{event['uid']}@gronan-live",
-    )
-
-    write_line(
-        lines,
-        f"DTSTAMP:{dtstamp}",
-    )
-
-    write_line(
-        lines,
-        f"SUMMARY:{escape_ics(event['title'])}",
-    )
-
-    write_line(
-        lines,
-        f"DTSTART:{utc(event['start'])}",
-    )
-
-    write_line(
-        lines,
-        f"DTEND:{utc(event['end'])}",
-    )
-
-    if event["location"]:
-        write_line(
-            lines,
-            f"LOCATION:{escape_ics(event['location'])}",
-        )
-
-    description = event["description"]
-
-    if event["url"]:
-
-        if description:
-            description += "\n\n"
-
-        description += (
-            "Läs mer:\n"
-            + event["url"]
-        )
-
-    if description:
-
-        write_line(
-            lines,
-            "DESCRIPTION:"
-            + escape_ics(description),
-        )
-
-    if event["url"]:
-        write_line(
-            lines,
-            f"URL:{event['url']}",
-        )
+    title = event["title"]
 
     if event["cancelled"]:
+        title = "INSTÄLLD – " + title
 
-        write_line(
-            lines,
-            "STATUS:CANCELLED",
-        )
-
-    lines.append("END:VEVENT")
+    lines.extend(
+        [
+            "BEGIN:VEVENT",
+            f"UID:{event['uid']}@gronan-live",
+            f"DTSTAMP:{dtstamp}",
+            f"SUMMARY:{title}",
+            f"DESCRIPTION:{event['description']}",
+            "LOCATION:Gröna Lund, Stockholm",
+            f"DTSTART:{utc(event['start'])}",
+            f"DTEND:{utc(event['end'])}",
+            "END:VEVENT",
+        ]
+    )
 
 lines.append("END:VCALENDAR")
 
-
-# ============================================================
-# Save
-# ============================================================
-
 with open(
-    OUTPUT_FILE,
+    "gronan-live.ics",
     "w",
     encoding="utf-8",
     newline="\r\n",
 ) as f:
-
     f.write("\r\n".join(lines))
 
-print()
-print("---------------------------------------")
-print(f"Generated {len(events)} events.")
-print(f"Saved to {OUTPUT_FILE}")
-print("---------------------------------------")
+print(f"Generated {len(filtered)} events.")
